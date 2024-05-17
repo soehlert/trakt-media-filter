@@ -61,7 +61,7 @@ Before you can use this script, you need to set up an application on Trakt.tv to
      - **Name**: Your application's name (e.g., My Movie Manager).
      - **Redirect uri**: Use `http://localhost:8000`.
      - **Javascript CORS**: Use `http://localhost`
-     - **Permissions**: Request permissions that your application needs (typically `public`, `private`, and additional permissions based on your requirements).
+     - **Permissions**: Request permissions that your application needs.
    - Submit the form to create your application.
 
 3. **Note Your API Keys**:
