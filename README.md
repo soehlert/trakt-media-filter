@@ -86,20 +86,20 @@ Replace `your_trakt_client_id_here` and `your_trakt_client_secret_here` with the
 To run the script, you can use the following command-line arguments:
 
 - `-n`, `--name`: Name of the person to search for.
-- `-id`, `--trakt_id`: Directly use the Trakt ID to fetch movies.
+- `-id`, `--trakt_id`: Directly use the Trakt ID of the person to fetch movies for.
 - `-f`, `--filter`: Filter displayed results by a specific role (e.g., cast, director, writer).
 - `-l`, `--list-name`: Specify a list name to create and add filtered movies to this list on Trakt.
 
 ### Examples
 
-**Search by Name and Display Movies:**
+**Search by Name and Display All Movies:**
 ```bash
 python media_filter.py -n "Donald Glover"
 ```
 
 **Filter Movies by Role:**
 ```bash
-python media_filter.py -n "Donald Glover" -f director
+python media_filter.py -n "Donald Glover" -f "executive producer"
 ```
 
 **Create a List and Add Filtered Movies:**
