@@ -6,7 +6,7 @@ from config import config_manager
 
 
 def fetch_known_for(person_id):
-    """ Fetch top two known for movies and shows for a person using their Trakt ID. """
+    """Fetch all movies and shows for a person and prepare a concise known for section."""
     access_token = get_access_token()
     headers = {
         'Authorization': f'Bearer {access_token}',
@@ -14,17 +14,21 @@ def fetch_known_for(person_id):
         'trakt-api-version': '2',
         'trakt-api-key': config_manager.get_config('CLIENT_ID')
     }
-    # Limiting the fetch to the top 2 movies and shows
+    # Fetching both movies and shows
     movies_url = f"{config_manager.get_config('API_BASE_URL')}/people/{person_id}/movies?extended=full"
     shows_url = f"{config_manager.get_config('API_BASE_URL')}/people/{person_id}/shows?extended=full"
 
-    movies_response = requests.get(movies_url, headers=headers).json().get('cast', [])[:2]
-    shows_response = requests.get(shows_url, headers=headers).json().get('cast', [])[:2]
+    # Handle API requests safely
+    try:
+        movies_response = requests.get(movies_url, headers=headers).json().get('cast', [])
+        shows_response = requests.get(shows_url, headers=headers).json().get('cast', [])
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching data: {str(e)}")
+        return "Data fetch error"
 
-    known_for_movies = [movie['movie']['title'] for movie in movies_response if movie.get('movie')]
-    known_for_shows = [show['show']['title'] for show in shows_response if show.get('show')]
-
-    return ', '.join(known_for_movies + known_for_shows)
+    # Combine movies and shows into one list and sort/format them
+    combined_media = movies_response + shows_response
+    return get_known_for_titles(combined_media)
 
 
 def search_person(name):
@@ -40,33 +44,49 @@ def search_person(name):
     response = requests.get(search_url, headers=headers)
     persons = response.json()
 
-    # Sorting by score and limiting to top 5
-    sorted_persons = sorted(persons, key=lambda x: x['score'])[:5]
+    # Filter to ensure only person type results are processed
+    filtered_persons = []
+    for person in persons:
+        if 'person' in person:
+            filtered_persons.append(person)
 
-    # Enhance each person result with known for data
-    for person in sorted_persons:
+    # Enhance each person result with known for data, limit to top 5
+    top_persons = []
+    for person in filtered_persons[:5]:
         person_id = person['person']['ids']['trakt']
         person['person']['known_for'] = fetch_known_for(person_id)
+        top_persons.append(person)
 
-    return sorted_persons
+    return top_persons
 
 
 def choose_person(person_results):
     """ Allow the user to choose a person from the top 5 search results. """
+    if not person_results:
+        print("No valid data to display.")
+        return None
+
     print("Possible matches:")
     for index, person in enumerate(person_results):
-        known_for = person['person'].get('known_for', 'N/A')
-        print(f"{index + 1}: {person['person']['name']} - Trakt ID: {person['person']['ids']['trakt']}, Known for: {known_for}")
+        # Correctly access nested 'person' dictionary
+        person_details = person.get('person', {})
+        known_for = person_details.get('known_for', 'N/A')
+        name = person_details.get('name', 'Unknown')
+        trakt_id = person_details.get('ids', {}).get('trakt', 'No ID')
 
-    user_choice = int(input("\n\nEnter the number of the correct person: ")) - 1
-    if 0 <= user_choice < len(person_results):
-        return person_results[user_choice]['person']['ids']['trakt']
-    else:
-        print("Invalid choice, please run the script again and select a valid number.")
-        exit(1)
+        print(f"{index + 1}: {name} - Trakt ID: {trakt_id}, Known for: {known_for}")
+
+    try:
+        user_choice = int(input("\n\nEnter the number of the correct person: ")) - 1
+        if 0 <= user_choice < len(person_results):
+            return person_results[user_choice]['person']['ids']['trakt']
+    except ValueError:
+        print("Invalid input. Please enter a valid number.")
+    return None
 
 
 def get_person_movies(person_id):
+    """Fetch movies associated with a person and return detailed information."""
     access_token = get_access_token()
     headers = {
         'Authorization': f'Bearer {access_token}',
@@ -74,46 +94,64 @@ def get_person_movies(person_id):
         'trakt-api-version': '2',
         'trakt-api-key': config_manager.get_config('CLIENT_ID')
     }
-    movies_url = f"{config_manager.get_config('API_BASE_URL')}/people/{person_id}/movies"
+    movies_url = f"{config_manager.get_config('API_BASE_URL')}/people/{person_id}/movies?extended=full"
+
     response = requests.get(movies_url, headers=headers)
-    movies_data = response.json()
+    if response.status_code == 200:
+        movies_data = response.json()
+        return movies_data
+    else:
+        print(f"Failed to fetch movies for person ID {person_id}: {response.status_code} - {response.text}")
+        return None
 
-    return movies_data
+
+def get_known_for_titles(media_list):
+    """Extract and format titles from the media list to a more readable format."""
+    movies = [item['movie'] for item in media_list if 'movie' in item]
+    shows = [item['show'] for item in media_list if 'show' in item]
+
+    # Sort by 'votes' which is a common metric for popularity
+    sorted_movies = sorted(movies, key=lambda x: x.get('votes', 0), reverse=True)[:2]
+    sorted_shows = sorted(shows, key=lambda x: x.get('votes', 0), reverse=True)[:2]
+
+    formatted_titles = [f"{m['title']} ({m.get('year', 'Unknown Year')})" for m in sorted_movies + sorted_shows]
+    return ', '.join(formatted_titles) if formatted_titles else "Insufficient data"
 
 
-def display_movies_by_role(movies, role):
-    """ Display movies based on specified role (cast or any crew role) and return their IDs. """
-    role = role.lower()
-    filtered_movie_ids = []
-    print(f"Movies featuring the selected person as a {role.capitalize()}:")
+def display_movies_by_role(movies, role=None, show_details=False):
+    """ Display movies based on specified role (cast or any crew role) and return their IDs, titles, and roles. """
+    filtered_movies = []
     found = False
 
-    if role == 'cast':
-        for movie in movies.get('cast', []):
-            movie_id = movie['movie']['ids']['trakt']
-            title = movie['movie']['title']
-            year = movie['movie']['year'] if movie['movie']['year'] else 'Unknown year'
-            character = movie['character']
-            print(f"{title} ({year}) as {character} - Trakt ID: {movie_id}")
-            filtered_movie_ids.append(movie_id)
-            found = True
-    else:
-        crew_movies = movies.get('crew', {})
-        for crew_type in crew_movies.values():
-            for job in crew_type:
-                if job['job'].lower() == role:
+    if 'cast' in movies:
+        for movie in movies['cast']:
+            character = movie.get('character')
+            if character:  # Ensure the character name is not empty
+                movie_id = movie['movie']['ids']['trakt']
+                title = movie['movie']['title']
+                year = movie['movie'].get('year', 'No Year Found')  # Handle None year
+                if show_details:
+                    print(f"{title} ({year if year else 'No Year Found'}) as {character} - Trakt ID: {movie_id}")
+                filtered_movies.append({'id': movie_id, 'title': title, 'role': character})
+                found = True
+
+    if 'crew' in movies:
+        for department, crew_jobs in movies['crew'].items():
+            for job in crew_jobs:
+                if role is None or job['job'].lower() == role.lower():
                     movie_id = job['movie']['ids']['trakt']
                     title = job['movie']['title']
-                    year = job['movie']['year'] if job['movie']['year'] else 'Unknown year'
-                    job_desc = job['job']
-                    print(f"{title} ({year}) - {job_desc} as {role} - Trakt ID: {movie_id}")
-                    filtered_movie_ids.append(movie_id)
+                    year = job['movie'].get('year', 'No Year Found')
+                    job_description = job['job']
+                    if show_details:
+                        print(f"{title} ({year if year else 'No Year Found'}) - {job_description} as {department} - Trakt ID: {movie_id}")
+                    filtered_movies.append({'id': movie_id, 'title': title, 'role': f"{job_description} ({department})"})
                     found = True
 
     if not found:
-        print(f"No movies found where the selected person is a {role.capitalize()}.")
+        print(f"No movies found where the selected person is involved as '{role if role else 'any role'}'.")
 
-    return filtered_movie_ids
+    return filtered_movies
 
 
 def create_or_get_list(list_name):
@@ -149,7 +187,7 @@ def create_or_get_list(list_name):
 
 
 def add_movies_to_list(list_id, movies):
-    """ Add movies to a specified list by list ID in batches. """
+    """ Add movies to a specified list by list ID in batches with progress updates. """
     access_token = get_access_token()
     headers = {
         'Authorization': f'Bearer {access_token}',
@@ -161,21 +199,28 @@ def add_movies_to_list(list_id, movies):
 
     batch_size = 5  # Adjust batch size as needed
     batches = [movies[i:i + batch_size] for i in range(0, len(movies), batch_size)]
+    total_batches = len(batches)
 
-    for batch in batches:
-        time.sleep(1)
+    for index, batch in enumerate(batches, start=1):
         payload = {'movies': [{'ids': {'trakt': movie_id}} for movie_id in batch]}
         response = requests.post(url, headers=headers, json=payload)
         if response.status_code == 201:
-            print("Batch of movies added to the list successfully.")
+            print(f"Batch {index}/{total_batches} of movies added to the list successfully.")
         else:
-            print(
-                f"Failed to add batch of movies to the list. Status: {response.status_code}, Message: {response.text}")
+            print(f"Failed to add batch {index}/{total_batches} to the list. Status: {response.status_code}, Message: {response.text}")
             if response.status_code == 429:
                 retry_delay = int(response.headers.get('Retry-After', 3))  # Use Retry-After header if available
                 print(f"Rate limit hit. Waiting for {retry_delay} seconds...")
                 time.sleep(retry_delay)
-                add_movies_to_list(list_id, batch)  # Retry the current batch
+                # Recursively retry only the failed batch
+                add_movies_to_list(list_id, batch)
+            else:
+                # Break from the loop if a non-retryable error occurs
+                break
+
+        # Pause slightly between requests to respect API rate limits
+        time.sleep(1)  # Adjust as necessary based on the server's response and policies
+
 
 
 def like_list(list_id):
@@ -205,9 +250,11 @@ def main():
     parser.add_argument('-n', '--name', type=str, help='The name of the person to search for in the movie database.')
     parser.add_argument('-id', '--trakt_id', type=int, help='The Trakt ID of the person to fetch movies for.')
     parser.add_argument('-f', '--filter', type=str,
-                        help='Filter displayed results by a specific role (cast, director, writer, etc.).')
+                        help='Filter displayed results by a specific role (cast, director, writer, etc.).',
+                        default=None)
     parser.add_argument('-l', '--list-name', type=str,
                         help='Create and add filtered movies to a specified list on Trakt.')
+
     args = parser.parse_args()
 
     if args.name:
@@ -222,32 +269,21 @@ def main():
         selected_person_id = args.trakt_id
         print(f"Using provided Trakt ID: {selected_person_id}")
     else:
-        parser.error('No action requested, add --name or --trakt_id')
+        parser.error('No action requested, add --name or --trakt_id to perform a search.')
 
-    # Fetch and display movies associated with the selected person
     movies = get_person_movies(selected_person_id)
     if movies:
-        if args.filter:
-            filtered_movie_ids = display_movies_by_role(movies, args.filter)
-            if args.list_name:
-                list_id = create_or_get_list(args.list_name)
-                time.sleep(2)
-                like_list(list_id)
-                time.sleep(2)
-                add_movies_to_list(list_id, filtered_movie_ids)
-            else:
-                print("\n------ Filtered movies --------")
-                for movie_id in filtered_movie_ids:
-                    print(f"Movie ID: {movie_id} would be listed here.")
+        filtered_movies = display_movies_by_role(movies, args.filter, show_details=bool(args.list_name))
+        if args.list_name:
+            list_id = create_or_get_list(args.list_name)
+            time.sleep(2)
+            like_list(list_id)
+            time.sleep(2)
+            add_movies_to_list(list_id, [movie['id'] for movie in filtered_movies])
         else:
-            print("\nMovies featuring the selected person:")
-            if 'cast' in movies:
-                for movie in movies['cast']:
-                    print(f"{movie['movie']['title']} ({movie['movie']['year']}) as {movie['character']}")
-            if 'crew' in movies:
-                for job_category in movies.get('crew', {}):
-                    for job in movies['crew'][job_category]:
-                        print(f"{job['movie']['title']} ({job['movie']['year']}) - {job_category} as {job['job']}")
+            print("\n------ Filtered movies --------")
+            for movie in filtered_movies:
+                print(f"{movie['title']} - Movie ID: {movie['id']} (Role: {movie['role']})")
 
 
 if __name__ == "__main__":
