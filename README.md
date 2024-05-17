@@ -6,10 +6,46 @@ This script allows you to search for people on Trakt.tv, filter movies by their 
 
 ## Getting Started
 
-### Prerequisites
+## Prerequisites
 
-- Python 3.x
-- `requests` library installed (you can install this via `pip install requests`)
+Before you begin, ensure you have Python 3.x installed on your system. You will also need to set up a virtual environment and install the required packages:
+
+### Setting Up Python and Virtual Environment
+
+1. **Install Python**:
+   - If not already installed, download and install Python from [python.org](https://www.python.org/downloads/).
+
+2. **Create a Virtual Environment**:
+   - Open a terminal or command prompt.
+   - Navigate to the project directory where you want to set up the virtual environment.
+   - Run the following command to create a virtual environment named `env`:
+     ```bash
+     python -m venv env
+     ```
+
+3. **Activate the Virtual Environment**:
+   - On Windows, activate the virtual environment by running:
+     ```bash
+     .\env\Scripts\activate
+     ```
+   - On macOS or Linux, activate it with:
+     ```bash
+     source env/bin/activate
+     ```
+
+4. **Install Required Packages**:
+   - Ensure that the virtual environment is activated.
+   - Install the required libraries using pip:
+     ```bash
+     pip install requirements.txt
+     ```
+
+### Note
+
+- Remember to activate the virtual environment every time you work on this project. This ensures that you are using the correct Python interpreter and dependencies.
+
+- Deactivate the virtual environment when you are done by running `deactivate` in your terminal or command prompt.
+
 
 ### Trakt.tv API Setup
 
