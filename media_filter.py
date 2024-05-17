@@ -1,5 +1,5 @@
 import argparse
-import json
+import time
 import requests
 from auth import get_access_token
 from config import config_manager
@@ -58,7 +58,7 @@ def choose_person(person_results):
         known_for = person['person'].get('known_for', 'N/A')
         print(f"{index + 1}: {person['person']['name']} - Trakt ID: {person['person']['ids']['trakt']}, Known for: {known_for}")
 
-    user_choice = int(input("Enter the number of the correct person: ")) - 1
+    user_choice = int(input("\n\nEnter the number of the correct person: ")) - 1
     if 0 <= user_choice < len(person_results):
         return person_results[user_choice]['person']['ids']['trakt']
     else:
@@ -79,61 +79,6 @@ def get_person_movies(person_id):
     movies_data = response.json()
 
     return movies_data
-
-
-def mark_movie_as_watched(movie_id, dry_run=False):
-    """ Simulate or mark a movie as watched on Trakt.tv by its ID. """
-    if dry_run:
-        print(f"Would mark '{movie_id}' as watched.")
-        return {'mock': 'dry_run_response'}
-
-    access_token = get_access_token()
-    headers = {
-        'Authorization': f'Bearer {access_token}',
-        'Content-Type': 'application/json',
-        'trakt-api-version': '2',
-        'trakt-api-key': config_manager.get_config('CLIENT_ID')
-    }
-    watched_url = f"{config_manager.get_config('API_BASE_URL')}/sync/history"
-    payload = {'movies': [{'ids': {'trakt': movie_id}}]}
-    response = requests.post(watched_url, json=payload, headers=headers)
-    return response.json()
-
-
-def process_watched_movies(movies, role, dry_run=False):
-    """ Process and optionally simulate marking movies as watched based on specified role. """
-    output = []
-    found = False  # Debugging flag to check if we find any matching role
-    role = role.lower()  # Convert role to lower case for case-insensitive comparison
-    movie_ids_to_mark = []  # Collect movies IDs to mark as watched
-
-    if role == 'cast':
-        for movie in movies.get('cast', []):
-            if dry_run:
-                output.append(f"Would mark '{movie['movie']['title']}' as watched.")
-            else:
-                movie_ids_to_mark.append(movie['movie']['ids']['trakt'])
-    else:
-        if 'crew' in movies:
-            for crew_category, jobs in movies['crew'].items():
-                for job in jobs:
-                    if role == job['job'].lower():  # Match role case-insensitively within the job details
-                        found = True
-                        if dry_run:
-                            output.append(f"Would mark '{job['movie']['title']}' as watched.")
-                        else:
-                            movie_ids_to_mark.append(job['movie']['ids']['trakt'])
-
-    if dry_run:
-        if not found:
-            output.append(f"No movies found where '{role}' is a role.")
-        return output  # Return messages for dry run only
-    else:
-        # Actually mark movies as watched if not in dry run mode
-        for movie_id in movie_ids_to_mark:
-            mark_movie_as_watched(movie_id)
-        if not movie_ids_to_mark:
-            print(f"No movies found where '{role}' is a role to mark as watched.")
 
 
 def display_movies_by_role(movies, role):
@@ -204,7 +149,7 @@ def create_or_get_list(list_name):
 
 
 def add_movies_to_list(list_id, movies):
-    """ Add movies to a specified list by list ID. """
+    """ Add movies to a specified list by list ID in batches. """
     access_token = get_access_token()
     headers = {
         'Authorization': f'Bearer {access_token}',
@@ -213,14 +158,45 @@ def add_movies_to_list(list_id, movies):
         'trakt-api-key': config_manager.get_config('CLIENT_ID')
     }
     url = f"{config_manager.get_config('API_BASE_URL')}/users/me/lists/{list_id}/items"
-    payload = {
-        'movies': [{'ids': {'trakt': movie_id}} for movie_id in movies]
+
+    batch_size = 5  # Adjust batch size as needed
+    batches = [movies[i:i + batch_size] for i in range(0, len(movies), batch_size)]
+
+    for batch in batches:
+        time.sleep(1)
+        payload = {'movies': [{'ids': {'trakt': movie_id}} for movie_id in batch]}
+        response = requests.post(url, headers=headers, json=payload)
+        if response.status_code == 201:
+            print("Batch of movies added to the list successfully.")
+        else:
+            print(
+                f"Failed to add batch of movies to the list. Status: {response.status_code}, Message: {response.text}")
+            if response.status_code == 429:
+                retry_delay = int(response.headers.get('Retry-After', 3))  # Use Retry-After header if available
+                print(f"Rate limit hit. Waiting for {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                add_movies_to_list(list_id, batch)  # Retry the current batch
+
+
+def like_list(list_id):
+    """ Like a list on Trakt.tv by its ID. """
+    access_token = get_access_token()
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json',
+        'trakt-api-version': '2',
+        'trakt-api-key': config_manager.get_config('CLIENT_ID')
     }
-    response = requests.post(url, headers=headers, json=payload)
-    if response.status_code == 201:
-        print("Movies added to the list successfully.")
+    url = f"{config_manager.get_config('API_BASE_URL')}/users/me/lists/{list_id}/like"
+    response = requests.post(url, headers=headers)
+    if response.status_code == 204:  # Trakt uses 204 No Content for a successful like action
+        print("\nList liked successfully.")
     else:
-        print("Failed to add movies to the list.")
+        print(f"Failed to like the list. Status: {response.status_code}, Message: {response.text}")
+        if response.status_code == 429:  # Rate limit exceeded
+            print("Rate limit hit. Waiting for 2 second...")
+            time.sleep(2)
+            like_list(list_id)
 
 
 def main():
@@ -234,7 +210,6 @@ def main():
                         help='Create and add filtered movies to a specified list on Trakt.')
     args = parser.parse_args()
 
-    dry_run_output = []
     if args.name:
         results = search_person(args.name)
         if results:
@@ -256,6 +231,9 @@ def main():
             filtered_movie_ids = display_movies_by_role(movies, args.filter)
             if args.list_name:
                 list_id = create_or_get_list(args.list_name)
+                time.sleep(2)
+                like_list(list_id)
+                time.sleep(2)
                 add_movies_to_list(list_id, filtered_movie_ids)
             else:
                 print("\n------ Filtered movies --------")
