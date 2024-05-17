@@ -20,24 +20,24 @@ Before you begin, ensure you have Python 3.x installed on your system. You will 
    - Navigate to the project directory where you want to set up the virtual environment.
    - Run the following command to create a virtual environment named `env`:
      ```bash
-     python -m venv env
+     python -m venv virtenv
      ```
 
 3. **Activate the Virtual Environment**:
    - On Windows, activate the virtual environment by running:
      ```bash
-     .\env\Scripts\activate
+     .\virtenv\Scripts\activate
      ```
    - On macOS or Linux, activate it with:
      ```bash
-     source env/bin/activate
+     source virtenv/bin/activate
      ```
 
 4. **Install Required Packages**:
    - Ensure that the virtual environment is activated.
    - Install the required libraries using pip:
      ```bash
-     pip install requirements.txt
+     pip install -r requirements.txt
      ```
 
 ### Note
